@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cjm_substrate_qt_kit.keys import bind
 from cjm_substrate_qt_kit.style import apply_row_style
+from cjm_substrate_qt_kit.theme import style_text_pane
 from cjm_substrate_tui_kit.form import ConfigForm
 from cjm_substrate_tui_kit.viewport import tail
 from cjm_transcript_decomp_tui.runs import (DecompIndex, group_batches, PropsetIndex,
@@ -181,6 +182,7 @@ class DecompWindow(QMainWindow):
         def text_pane() -> QPlainTextEdit:
             pane = QPlainTextEdit()
             pane.setReadOnly(True)
+            style_text_pane(pane, live=True)
             return pane
 
         self.runs_head = label()

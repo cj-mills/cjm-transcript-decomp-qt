@@ -6,6 +6,7 @@ Only the window in the middle differs."""
 
 import sys
 
+from cjm_substrate_qt_kit.theme import apply_theme
 from cjm_transcript_decomp_tui.cli import (build_parser, hand_off, resolve_settings,
                                            resolve_split_flags)
 from PySide6.QtWidgets import QApplication
@@ -20,6 +21,7 @@ def main() -> int:  # Console-script entry point (cjm-transcript-decomp-qt)
     args = resolve_split_flags(parser.parse_args())
     s = resolve_settings(args)
     qapp = QApplication(sys.argv[:1])
+    apply_theme(qapp)
     win = DecompWindow(s["manifests_dir"], runs_dir=s["runs_dir"],
                        sysmon_capability=s["sysmon_capability"],
                        graph_capability=args.graph_capability,
