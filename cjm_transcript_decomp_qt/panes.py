@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cjm_substrate_tui_kit.viewport import tail
-from cjm_transcript_decomp_tui.runs import SourceRunIndex
-from cjm_transcript_decomp_tui.segments import fmt_ts
+from cjm_transcript_decomp_core.runs import SourceRunIndex
+from cjm_transcript_decomp_core.segments import fmt_ts
 
 
 # ---- runs stage ---------------------------------------------------------

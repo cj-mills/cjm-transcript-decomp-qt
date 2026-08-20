@@ -6,11 +6,10 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 
 ## Modules
 
-- **`cjm_transcript_decomp_qt`**
+- **`cjm_transcript_decomp_qt.__init__`**
 - **`cjm_transcript_decomp_qt.app`** — The Qt decomp-batch shell: the same batch queueing over transcription-run
 - **`cjm_transcript_decomp_qt.cli`** — Console-script driver for the Qt shell: the SAME argument surface,
 - **`cjm_transcript_decomp_qt.panes`** — Pure row/label builders for the decomp Qt shell — the paint logic, Qt-free.
-- **`cjm_transcript_decomp_qt.player`** — Span playback via QMediaPlayer — the Qt lane's audio answer (DEC dcf8a712)
 - **`cjm_transcript_decomp_qt.session`** — One read-only decomp inspection seat + the propose pre-stage behind a
 
 ## API
@@ -46,14 +45,10 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 - `segments_header_html` _function_ — The drilled source's headline: row/gap/missing counts + the recorded
 - `vadform_header_html` _function_ — Form headline + the probe-only doctrine + the split-preview state.
 
-### `cjm_transcript_decomp_qt.player`
-
-- `SpanPlayer` _class_ — Play/stop one WAV span at a time; r replays, escape stops.
-
 ### `cjm_transcript_decomp_qt.session`
 
 - `DecompSession` _class_ — The loop-thread seat pair for the decomp shell.
 
 ## Dependencies
 
-**Depends on:** `PySide6`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-substrate-tui-kit`, `cjm-transcript-decomp-core`, `cjm-transcript-decomp-tui`
+**Depends on:** `PySide6`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-substrate-tui-kit`, `cjm-transcript-decomp-core`

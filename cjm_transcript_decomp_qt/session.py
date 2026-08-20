@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 from cjm_substrate.core.manager import CapabilityManager
 from cjm_substrate_qt_kit.loopthread import LoopThreadSession
 from cjm_transcript_decomp_core.cli import load_capabilities
-from cjm_transcript_decomp_tui.segments import SegmentStack
+from cjm_transcript_decomp_core.segments import SegmentStack
 
 
 class DecompSession(LoopThreadSession):

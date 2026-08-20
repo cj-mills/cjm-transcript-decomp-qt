@@ -1,14 +1,15 @@
 """Console-script driver for the Qt shell: the SAME argument surface,
-resolution ladder, and headless hand-off as cjm-transcript-decomp-tui — all
-imported from it (build_parser / resolve_split_flags / resolve_settings /
-hand_off), so the two shells cannot drift on the reproducibility contract.
-Only the window in the middle differs."""
+resolution ladder, and headless hand-off as every decomp shell — all
+imported from cjm_transcript_decomp_core.launch (build_parser /
+resolve_split_flags / resolve_settings / hand_off; absorbed there by spine
+absorption 12f342f1), so the shells cannot drift on the reproducibility
+contract. Only the window in the middle differs."""
 
 import sys
 
 from cjm_substrate_qt_kit.theme import apply_theme
-from cjm_transcript_decomp_tui.cli import (build_parser, hand_off, resolve_settings,
-                                           resolve_split_flags)
+from cjm_transcript_decomp_core.launch import (build_parser, hand_off, resolve_settings,
+                                               resolve_split_flags)
 from PySide6.QtWidgets import QApplication
 
 from .app import DecompWindow

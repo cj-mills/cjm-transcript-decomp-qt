@@ -24,16 +24,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from cjm_substrate_qt_kit.keys import bind
+from cjm_substrate_qt_kit.player import SpanPlayer
 from cjm_substrate_qt_kit.style import apply_row_style
 from cjm_substrate_qt_kit.theme import style_text_pane
 from cjm_substrate_tui_kit.form import ConfigForm
 from cjm_substrate_tui_kit.viewport import tail
-from cjm_transcript_decomp_tui.runs import (DecompIndex, group_batches, PropsetIndex,
-                                            SourceRunIndex, TrainingRunIndex)
-from cjm_transcript_decomp_tui.segments import (aseg_index_for, build_display,
-                                                capability_config_schema, fmt_ts, locate_span,
-                                                predicted_rows, probe_compare, realign_rows,
-                                                split_predicted, vad_summary)
+from cjm_transcript_decomp_core.runs import (DecompIndex, group_batches, PropsetIndex,
+                                             SourceRunIndex, TrainingRunIndex)
+from cjm_transcript_decomp_core.segments import (aseg_index_for, build_display,
+                                                 capability_config_schema, fmt_ts, locate_span,
+                                                 predicted_rows, probe_compare, realign_rows,
+                                                 split_predicted, vad_summary)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QInputDialog, QLabel, QListWidget, QListWidgetItem, QMainWindow,
                                QPlainTextEdit, QSplitter, QStackedWidget, QVBoxLayout, QWidget)
@@ -43,7 +44,6 @@ from .panes import (batch_html, config_diffs, decomp_header, decomp_rows, drill_
                     probe_target_html, probeview_header_html, run_detail_html, run_rows,
                     runs_header, segment_detail, segment_rows, segments_header_html,
                     vadform_header_html)
-from .player import SpanPlayer
 from .session import DecompSession
 
 HINTS = {

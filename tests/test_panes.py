@@ -4,7 +4,7 @@ Real spine pieces where cheap (build_display / predicted_rows from the tui,
 kit ConfigForm over a small schema), plain dicts for the manifests."""
 
 from cjm_substrate_tui_kit.form import ConfigForm
-from cjm_transcript_decomp_tui.segments import build_display, predicted_rows
+from cjm_transcript_decomp_core.segments import build_display, predicted_rows
 
 from cjm_transcript_decomp_qt.panes import (batch_html, config_diffs,
                                             decomp_rows, drill_header_html,
