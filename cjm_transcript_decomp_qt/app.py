@@ -23,8 +23,11 @@ probes. No blocked-reason poll: decomp loads no heavy comparison stack."""
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from cjm_substrate_qt_kit.keys import bind
+from cjm_substrate_qt_kit.findbar import FindBar
+from cjm_substrate_qt_kit.keyhints import KeyHintsOverlay
+from cjm_substrate_qt_kit.keymap import KeymapRegistry
 from cjm_substrate_qt_kit.player import SpanPlayer
+from cjm_substrate_qt_kit.statusstrip import StatusStrip
 from cjm_substrate_qt_kit.style import apply_row_style
 from cjm_substrate_qt_kit.theme import style_text_pane
 from cjm_substrate_tui_kit.form import ConfigForm
@@ -236,35 +239,71 @@ class DecompWindow(QMainWindow):
         for p in (self.runs_page, self.results_page, self.segments_page,
                   self.vadform_page, self.probeview_page):
             self.stack.addWidget(p)
-        self.setCentralWidget(self.stack)
-
+        self.findbar = FindBar(self.seg_text)  # focus-follow covers pv_text too
+        central = QWidget()
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addWidget(self.stack, 1)
+        outer.addWidget(self.findbar)
+        self.strip = StatusStrip()
+        outer.addWidget(self.strip)
+        self.hints_overlay = KeyHintsOverlay(self)
+        self.setCentralWidget(central)
         # Decomp ALWAYS journals — extension IS graph writing — so the chip
-        # shows the target, never a NOT-JOURNALED state.
-        self.chip_journal = QLabel()
-        self.statusBar().addPermanentWidget(self.chip_journal)
+        # shows the target, never a NOT-JOURNALED state. It rides the strip's
+        # chip row now (DEC 2a42c028 — QStatusBar retired).
 
     def _bind_keys(self) -> None:
-        for key, fn in (("J", lambda: self.move_cursor(1)),
-                        ("K", lambda: self.move_cursor(-1)),
-                        ("Return", self.on_select),
-                        ("Space", self.on_select),
-                        ("T", self.on_cycle_text_from),
-                        ("V", self.on_results),
-                        ("R", self.on_reload),
-                        ("N", self.on_confirm),
-                        ("B", self.on_back),
-                        ("C", self.on_vad_config),
-                        ("P", self.on_probe),
-                        ("S", self.on_toggle_split),
-                        ("Shift+R", self.on_toggle_respine),
-                        ("E", self.on_toggle_event_split),
-                        ("Shift+E", self.on_cycle_propset),
-                        ("Shift+P", self.on_propose_missing),
-                        ("[", lambda: self.nudge_speed(-0.25)),
-                        ("]", lambda: self.nudge_speed(0.25)),
-                        ("Escape", self.on_stop_audio),
-                        ("Q", self.on_quit)):
-            bind(self, key, fn)
+        # Kit KeymapRegistry (adoption rung caa33c98): the declarative table is
+        # the discovery surface; guard_text_entry gates character verbs off
+        # while the FindBar field has focus.
+        self.keymap = KeymapRegistry(self)
+        add = self.keymap.add
+        add("next", "Next row", "J", lambda: self.move_cursor(1), group="Rows")
+        add("prev", "Previous row", "K", lambda: self.move_cursor(-1),
+            group="Rows")
+        add("select", "Select / descend", "Return", self.on_select,
+            group="Rows")
+        add("select-space", "Select (Space)", "Space", self.on_select,
+            group="Rows")
+        add("back", "Back", "B", self.on_back, group="Rows")
+        add("cycle-text-from", "Cycle text-from", "T", self.on_cycle_text_from,
+            group="Stage")
+        add("results", "Results view", "V", self.on_results, group="Stage")
+        add("reload", "Reload", "R", self.on_reload, group="Stage")
+        add("confirm", "Confirm", "N", self.on_confirm, group="Stage")
+        add("vad-config", "VAD config", "C", self.on_vad_config, group="Stage")
+        add("probe", "Probe", "P", self.on_probe, group="Stage")
+        add("toggle-split", "Toggle split", "S", self.on_toggle_split,
+            group="Proposals")
+        add("toggle-respine", "Toggle respine", "Shift+R",
+            self.on_toggle_respine, group="Proposals")
+        add("toggle-event-split", "Toggle event split", "E",
+            self.on_toggle_event_split, group="Proposals")
+        add("cycle-propset", "Cycle propset", "Shift+E", self.on_cycle_propset,
+            group="Proposals")
+        add("propose-missing", "Propose missing", "Shift+P",
+            self.on_propose_missing, group="Proposals")
+        add("slower", "Playback slower", "[", lambda: self.nudge_speed(-0.25),
+            group="Audio")
+        add("faster", "Playback faster", "]", lambda: self.nudge_speed(0.25),
+            group="Audio")
+        add("stop-audio", "Stop audio", "Escape", self.on_stop_audio,
+            group="Audio")
+        add("quit", "Quit", "Q", self.on_quit, group="App")
+        add("find", "Find in text pane", "Ctrl+F", self.open_find)
+        add("find-next", "Find next", "F3", self.findbar.next)
+        add("find-previous", "Find previous", "Shift+F3", self.findbar.previous)
+        add("keys", "Keyboard hints", "?", self.hints_overlay.toggle)
+        self.keymap.guard_text_entry()
+
+    def open_find(self) -> None:
+        """Ctrl+F: find over the visible text pane (kit FindBar; focus-follow
+        re-attaches when the user clicks into another searchable pane)."""
+        pane = self.pv_text if self.stage == "probeview" else self.seg_text
+        self.findbar.attach(pane)
+        self.findbar.open()
 
     # ---- painting -------------------------------------------------------
 
@@ -396,23 +435,28 @@ class DecompWindow(QMainWindow):
             self.pv_text.setPlainText("")
 
     def _refresh_status(self) -> None:
+        """Footer decomposition (DEC 2a42c028): stage + journal chips, the
+        error/busy/notice ladder on the readout, the stage legend on the
+        hint line, and the ?-overlay tracking the registry."""
         chip = (f"<span style='color:#3f9d55'> graph→{self.graph_capability} "
                 "</span>")
         if self.graph_db_path:
             chip += (f"<span style='color:#8a9299'>@"
                      f"{tail(self.graph_db_path, 28)} </span>")
-        self.chip_journal.setText(chip)
+        self.strip.set_chips([("stage", self.stage.upper()),
+                              ("journal", chip)])
         hints_key = ("results_drill" if self.stage == "results"
                      and self.results_run is not None else self.stage)
         if self.error:
-            msg = f"⚠ {self.error}"
+            self.strip.set_readout(f"⚠ {self.error}", role="warn")
         elif self.busy:
-            msg = self.busy
+            self.strip.set_readout(self.busy)
         elif self.notice:
-            msg = self.notice
+            self.strip.set_readout(self.notice)
         else:
-            msg = f"{self.stage.upper()}  ·  {HINTS[hints_key]}"
-        self.statusBar().showMessage(msg)
+            self.strip.clear_readout()
+        self.strip.set_hints(HINTS[hints_key] + " · ? keys")
+        self.hints_overlay.set_entries(self.keymap.entries())
 
     # ---- selection state helpers (verbatim Textual ports) ----------------
 
