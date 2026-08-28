@@ -202,3 +202,22 @@ def test_trainrun_rows_marks_effective_pick_pin_and_newest():
     assert "← pin" in rows[1]["text"] and rows[1]["text"].startswith("  ")
     assert [r["index"] for r in rows] == [0, 1]
     assert trainrun_rows([], None, None)[0]["style"] == "dim"
+
+
+def test_run_rows_partial_multi_source_cover_paints_red():
+    """Multi-source event carve (decomp manifest 0.2.6): a run whose sources
+    are only PARTLY covered by proposal sets chips '⚠k/n no set · …' and
+    paints red like the no-set case — the confirm guard's refusal class
+    stays visible on the row; a full cover paints the plain chip."""
+    rows = run_rows([src_manifest()], picked=[], text_from={},
+                    decomp_counts={}, event_split=True,
+                    propset_chip=lambda m: "⚠1/2 no set · ab12cd34 5+2 / no set")
+    assert rows[0]["style"] == "red" and "⚡⚠1/2 no set" in rows[0]["text"]
+    rows = run_rows([src_manifest()], picked=["/runs/r1.json"], text_from={},
+                    decomp_counts={}, event_split=True,
+                    propset_chip=lambda m: "⚠1/2 no set · ab12cd34 5+2 / no set")
+    assert rows[0]["style"] == "green"                    # picked wins, as for no-set
+    rows = run_rows([src_manifest()], picked=[], text_from={},
+                    decomp_counts={}, event_split=True,
+                    propset_chip=lambda m: "ab12cd34 5+2 / ef56ab78 3")
+    assert rows[0]["style"] == "" and "⚡ab12cd34 5+2 / ef56ab78 3" in rows[0]["text"]

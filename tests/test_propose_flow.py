@@ -111,7 +111,8 @@ def test_propset_coexist_regenerate_targets_and_fresh_default(window):
     assert w._resolved_propset(run_a) is not None
     w.picked = [run_a["_path"], w.src_index.runs[1]["_path"]]
     # coexist: the source WITH a set is a target too, named as a regenerate
-    assert [m["run_id"] for m in w._propose_targets()] == ["run_a", "run_b"]
+    assert [(t["run"]["run_id"], t["has_set"]) for t in w._propose_targets()] \
+        == [("run_a", True), ("run_b", False)]
     w.on_propose_missing()
     assert len(w.propose_armed["targets"]) == 2
     assert "propose 2 source(s)" in w.notice and "1 regenerate" in w.notice
@@ -121,13 +122,71 @@ def test_propset_coexist_regenerate_targets_and_fresh_default(window):
     w.propose_armed = None
     w.picked = [run_a["_path"]]
     w.on_propose_missing()
-    w.propset_pick[run_a["_path"]] = "/stale/manifest.json"
+    key = w._source_key(run_a, 0)
+    w.propset_pick[key] = "/stale/manifest.json"
     w.on_propose_missing()                               # second press: runs
-    assert w.propose_busy and w._armed_targets[0]["run_id"] == "run_a"
+    assert w.propose_busy and w._armed_targets[0]["run"]["run_id"] == "run_a"
     w._on_propose_done(_Done({"landed": 1, "error": None}))
-    assert not w.propose_busy and run_a["_path"] not in w.propset_pick
+    assert not w.propose_busy and key not in w.propset_pick
     assert w.notice.startswith("⚡ 1 propset(s) landed with 6f803b12")
-    # only multi-source picks leave nothing to propose
+    # no picks: nothing to propose
     w.picked = []
     w.on_propose_missing()
     assert "pick runs first" in w.error
+
+
+def test_multi_source_run_proposes_per_source_and_carries_one_pointer_each(window, tmp_path):
+    """Multi-source transcription runs (decomp manifest 0.2.6): propose is
+    per SOURCE — a two-source run contributes both sources as targets, its
+    row chips '⚠1/2 no set' (red) until every source has a set, Shift+E
+    walks one ring over every (source, set) pair keeping a pick per source,
+    and the hand-off authority is ONE pointer per source (a tuple; the plan
+    renders it as a list)."""
+    w = window
+    runs = tmp_path / "runs"
+    (runs / "run_ab.json").write_text(json.dumps({
+        "format": "cjm-transcription-core/run-manifest", "run_id": "run_ab",
+        "created_at": 3.0,
+        "config": {"transcriber_capabilities": ["cjm-capability-voxtral-hf"]},
+        "sources": [{"source_path": str(tmp_path / "a.wav"),
+                     "content_hash": "sha256:aaaa", "segments": [1]},
+                    {"source_path": str(tmp_path / "b.wav"),
+                     "content_hash": "sha256:bbbb", "segments": [1, 2]}]}))
+    w._reload_indexes()
+    ab = next(m for m in w.src_index.runs if m["run_id"] == "run_ab")
+    # source a has propset_old, source b nothing: partial cover
+    assert w._resolved_propsets(ab) == [str(tmp_path / "proposals" / "propset_old" / "manifest.json"), None]
+    assert w._resolved_propset(ab) is None
+    assert w._propset_chip(ab).startswith("⚠1/2 no set · ")
+    w.picked = [ab["_path"]]
+    targets = w._propose_targets()
+    assert [(t["index"], t["has_set"]) for t in targets] == [(0, True), (1, False)]
+    w.on_propose_missing()
+    assert "propose 2 source(s)" in w.notice and "1 regenerate" in w.notice
+    # a set lands for b (and a second for a): full cover, one pointer per source
+    props = tmp_path / "proposals"
+    for name, h, path, ts in (("propset_b", "sha256:bbbb", "b.wav", 5.0),
+                              ("propset_a2", "sha256:aaaa", "a.wav", 6.0)):
+        (props / name).mkdir()
+        (props / name / "manifest.json").write_text(json.dumps({
+            "format": PropsetIndex.FORMAT, "proposal_set_id": f"{name}_22222222",
+            "created_at": ts, "training_run_id": "trainrun_2_b1072a9f",
+            "source": {"content_hash": h, "path": str(tmp_path / path)},
+            "counts": {"inhale": 2}}))
+    w._reload_indexes()
+    ab = next(m for m in w.src_index.runs if m["run_id"] == "run_ab")
+    ps = w._resolved_propset(ab)
+    assert isinstance(ps, tuple) and [p.split("/")[-2] for p in ps] == ["propset_a2", "propset_b"]
+    assert "⚠" not in w._propset_chip(ab) and " / " in w._propset_chip(ab)
+    # Shift+E: the ring walks (a: a2, old) then (b: b) — a pick per source
+    w.runs_list.setCurrentRow(w.src_index.runs.index(ab))
+    w.on_cycle_propset()
+    assert "src 1/2" in w.notice and w._resolved_propsets(ab)[0].endswith("propset_old/manifest.json")
+    assert w._resolved_propsets(ab)[1].endswith("propset_b/manifest.json")   # b untouched
+    w.on_cycle_propset()
+    assert "src 2/2" in w.notice and w._resolved_propsets(ab)[0].endswith("propset_old/manifest.json")
+    w.on_cycle_propset()                                                    # wraps to a: a2
+    assert "src 1/2" in w.notice and w._resolved_propsets(ab)[0].endswith("propset_a2/manifest.json")
+    # the hand-off fold keys on the tuple; the plan carries a list
+    (key, paths), = w._batches()
+    assert key[2] == ps and paths == [ab["_path"]]

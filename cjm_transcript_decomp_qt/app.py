@@ -99,7 +99,8 @@ class DecompWindow(QMainWindow):
         self.respine = respine
         self.event_split = event_split
         self.propset_pin = propset_pin
-        self.propset_pick: Dict[str, str] = {}
+        self.propset_pick: Dict[str, str] = {}      # "<run path>#<source idx>" -> set path (Shift+E)
+        self.propset_cursor: Dict[str, int] = {}    # run path -> position in its (source, set) ring
         self.training_run_pin = training_run_pin
         self.event_capability = event_capability
         self.src_index = SourceRunIndex(runs_dir)
@@ -527,33 +528,62 @@ class DecompWindow(QMainWindow):
         self.picked = [p for p in self.picked
                        if self._run_by_path(p) is not None]
 
-    def _propsets_for(self, m: Dict[str, Any]) -> List[Dict[str, Any]]:
-        srcs = m.get("sources") or []
-        if len(srcs) != 1:
-            return []
-        s = srcs[0]
+    def _propsets_for_source(self, s: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Every proposal set over ONE run source, newest first."""
         return self.propset_index.for_source(
             content_hash=str(s.get("content_hash") or "") or None,
             source_path=str(s.get("source_path") or "") or None)
 
-    def _resolved_propset(self, m: Dict[str, Any]) -> Optional[str]:
-        """CLI pin > Shift+E override > latest-by-source (DEC ae450551)."""
+    def _propsets_for(self, m: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
+        """Per SOURCE of the run (manifest order): its sets, newest first — a
+        multi-source run is N independent source-bound rings (decomp
+        manifest 0.2.6: the carve joins each set to its source)."""
+        return [self._propsets_for_source(s) for s in (m.get("sources") or [])]
+
+    @staticmethod
+    def _source_key(m: Dict[str, Any], i: int) -> str:
+        """The Shift+E pick key: run path + source index."""
+        return f"{m['_path']}#{i}"
+
+    def _resolved_propsets(self, m: Dict[str, Any]) -> List[Optional[str]]:
+        """Per source: CLI pin (single-source runs only — one pointer carves
+        one source) > Shift+E override > latest-by-source (DEC ae450551).
+        None = that source has no set."""
+        srcs = m.get("sources") or []
         if self.propset_pin:
-            return self.propset_pin
-        pick = self.propset_pick.get(m["_path"])
-        if pick:
-            return pick
-        sets = self._propsets_for(m)
-        return sets[0]["_path"] if sets else None
+            return ([self.propset_pin] if len(srcs) == 1
+                    else [None] * len(srcs))
+        out: List[Optional[str]] = []
+        for i, sets in enumerate(self._propsets_for(m)):
+            pick = self.propset_pick.get(self._source_key(m, i))
+            out.append(pick or (sets[0]["_path"] if sets else None))
+        return out
+
+    def _resolved_propset(self, m: Dict[str, Any]) -> Optional[Tuple[str, ...]]:
+        """The run's carve authority for the hand-off: ONE pointer per source
+        as a hashable tuple (it joins the group key; batch_argv renders every
+        pointer), or None when ANY source lacks a set — the refusal the
+        confirm guard names."""
+        ps = self._resolved_propsets(m)
+        return tuple(ps) if ps and all(ps) else None
 
     def _propset_chip(self, m: Dict[str, Any]) -> Optional[str]:
-        """The run row's ⚡ label (None = no set resolves — the refusal)."""
-        ps = self._resolved_propset(m)
-        if ps is None:
+        """The run row's ⚡ label: per-source set summaries ('/'-joined for
+        a multi-source run); a PARTIAL cover leads with '⚠k/n no set' so
+        run_rows paints it red; None = no source has a set."""
+        resolved = self._resolved_propsets(m)
+        if not resolved or not any(resolved):
             return None
-        chosen = next((s for s in self._propsets_for(m)
-                       if s["_path"] == ps), None)
-        return PropsetIndex.summary(chosen) if chosen else tail(ps, 20)
+        parts: List[str] = []
+        for ps, sets in zip(resolved, self._propsets_for(m)):
+            if ps is None:
+                parts.append("no set")
+                continue
+            chosen = next((s for s in sets if s["_path"] == ps), None)
+            parts.append(PropsetIndex.summary(chosen) if chosen else tail(ps, 20))
+        missing = sum(1 for ps in resolved if ps is None)
+        chip = " / ".join(parts)
+        return f"⚠{missing}/{len(resolved)} no set · {chip}" if missing else chip
 
     def _propose_targets(self) -> List[Dict[str, Any]]:
         """Picked single-source runs, one per source — sources that ALREADY
@@ -568,15 +598,21 @@ class DecompWindow(QMainWindow):
             m = self._run_by_path(p)
             if m is None:
                 continue
-            srcs = m.get("sources") or []
-            if len(srcs) != 1:
-                continue
-            key = str(srcs[0].get("content_hash")
-                      or srcs[0].get("source_path") or p)
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(m)
+            # ONE target per SOURCE (decomp manifest 0.2.6): a multi-source
+            # transcription run contributes every source it names — propose
+            # is per source and the carve joins each set to its source —
+            # deduped by content hash across the picked runs.
+            resolved = self._resolved_propsets(m)
+            for i, s in enumerate(m.get("sources") or []):
+                key = str(s.get("content_hash") or s.get("source_path")
+                          or f"{p}#{i}")
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({"run": m, "index": i,
+                            "source_path": str(s.get("source_path") or ""),
+                            "content_hash": str(s.get("content_hash") or ""),
+                            "has_set": bool(i < len(resolved) and resolved[i])})
         return out
 
     # ---- gestures (stage-dispatched, busy-gated like the Textual actions) ----
@@ -736,21 +772,35 @@ class DecompWindow(QMainWindow):
             self.notice = "propset pinned by --event-propset — cycle disabled"
             self._refresh_status()
             return
-        sets = self._propsets_for(m)
-        if len(sets) < 2:
+        # ONE ring over every (source, set) pair of the run (0.2.6): a
+        # single-source run cycles its sets as before; a multi-source run
+        # walks source 0's sets, then source 1's, ... — each step picks that
+        # source's set, so every source keeps its own effective pick.
+        rings = self._propsets_for(m)
+        pairs = [(i, s) for i, sets in enumerate(rings) for s in sets]
+        if len(pairs) < 2:
             self.notice = ("no alternate proposal sets for this source"
-                           if sets else "no proposal set matches this source")
+                           if pairs else "no proposal set matches this source")
             self._refresh_status()
             return
-        paths = [s["_path"] for s in sets]
-        current = self.propset_pick.get(m["_path"]) or paths[0]
-        nxt = paths[(paths.index(current) + 1) % len(paths)] \
-            if current in paths else paths[0]
-        self.propset_pick[m["_path"]] = nxt
-        chosen = next(s for s in sets if s["_path"] == nxt)
-        self.notice = (f"propset → {PropsetIndex.summary(chosen)} · model "
+        resolved = self._resolved_propsets(m)
+        cur = self.propset_cursor.get(m["_path"])
+        if cur is None:   # park on the first source's effective set
+            cur = next((k for k, (i, s) in enumerate(pairs)
+                        if i == 0 and s["_path"] == resolved[0]), 0)
+        nxt = (cur + 1) % len(pairs)
+        i, chosen = pairs[nxt]
+        self.propset_cursor[m["_path"]] = nxt
+        self.propset_pick[self._source_key(m, i)] = chosen["_path"]
+        ring = [s["_path"] for s in rings[i]]
+        src = Path(str((m.get("sources") or [{}])[i].get("source_path")
+                       or f"source-{i}")).stem
+        where = (f"src {i + 1}/{len(rings)} {src[:24]} · "
+                 if len(rings) > 1 else "")
+        self.notice = (f"{where}propset → {PropsetIndex.summary(chosen)} · model "
                        f"…{str(chosen.get('training_run_id') or '?')[-8:]} "
-                       f"({paths.index(nxt) + 1}/{len(paths)}, newest first)")
+                       f"({ring.index(chosen['_path']) + 1}/{len(ring)}, "
+                       f"newest first)")
         self._paint_runs()
         self._refresh_status()
 
@@ -801,8 +851,7 @@ class DecompWindow(QMainWindow):
             armed, self.propose_armed = self.propose_armed, None
             self.error = None
             self.propose_busy = True
-            sources = [str((m.get("sources") or [{}])[0].get("source_path")
-                           or "") for m in armed["targets"]]
+            sources = [t["source_path"] for t in armed["targets"]]
             fut = self.sess.propose_batch(self.event_capability,
                                           armed["run"]["_path"], sources,
                                           progress=self.progress_note.emit)
@@ -812,9 +861,7 @@ class DecompWindow(QMainWindow):
             return
         targets = self._propose_targets()
         if not targets:
-            self.error = ("picked runs are multi-source — propose serves "
-                          "single-source runs" if self.picked else
-                          "pick runs first — propose serves the picked batch")
+            self.error = "pick runs first — propose serves the picked batch"
             self._refresh_status()
             return
         self.trainrun_index.load()
@@ -824,8 +871,7 @@ class DecompWindow(QMainWindow):
             self.error = why
             self._refresh_status()
             return
-        regen = sum(1 for m in targets
-                    if self._resolved_propset(m) is not None)
+        regen = sum(1 for t in targets if t["has_set"])
         self.propose_armed = {"run": run, "targets": targets}
         self.error = None
         self.notice = (f"Shift+P again: propose {len(targets)} source(s) with "
@@ -892,8 +938,9 @@ class DecompWindow(QMainWindow):
         # A regenerated source's fresh set is its new default (53911bef):
         # drop the operator's older Shift+E pick so latest-per-source rules
         # again — an older generation stays one Shift+E away.
-        for m in self._armed_targets:
-            self.propset_pick.pop(m["_path"], None)
+        for t in self._armed_targets:
+            self.propset_pick.pop(self._source_key(t["run"], t["index"]), None)
+        self.propset_cursor.clear()
         self._reload_indexes()
         if self.stage == "runs":
             self._paint_runs()
@@ -1230,7 +1277,10 @@ class DecompWindow(QMainWindow):
                 return
         self.plan = {
             "batches": [{"text_from": tf, "graph_db_path": db,
-                         "event_propset": ps, "manifests": list(paths)}
+                         # one pointer per source (0.2.6); a plain list so a
+                         # persisted plan round-trips through JSON unchanged
+                         "event_propset": (list(ps) if ps else None),
+                         "manifests": list(paths)}
                         for (tf, db, ps), paths in self._batches()],
             "runs_dir": str(self.src_index.runs_dir),
             "manifests_dir": self.manifests_dir,

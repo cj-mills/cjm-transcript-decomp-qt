@@ -69,6 +69,11 @@ def run_rows(runs: List[Dict[str, Any]],           # SourceRunIndex.runs (newest
                 style = "red" if key not in picked_set else "green"
             else:
                 chunks.append(f"⚡{chip}")
+                # a multi-source run with only SOME sources covered leads
+                # its chip with ⚠ (0.2.6) — the same refusal class, so the
+                # same red until every source has a set
+                if chip.startswith("⚠"):
+                    style = "red" if key not in picked_set else "green"
         rows.append({"text": "  ".join(chunks), "style": style, "index": i})
     if not rows:
         rows.append({"text": "(no transcription run manifests found — "
@@ -146,8 +151,12 @@ def batch_html(batches: List[Tuple[Tuple[Optional[str], Optional[str],
                 line += ("  <b><span style='color:#c74a3c'>⚡ no propset"
                          "</span></b>")
             else:
+                # one pointer per source (0.2.6): a str for a single-source
+                # group, a tuple/list for a multi-source run
+                ptrs = [ps] if isinstance(ps, str) else list(ps)
                 line += (f"  <span style='color:#9b59b6'>⚡ "
-                         f"{html.escape(Path(ps).parent.name[-12:])}</span>")
+                         f"{html.escape(' + '.join(Path(p).parent.name[-12:] for p in ptrs))}"
+                         "</span>")
         line += (": <span style='color:#8a9299'>"
                  + html.escape(", ".join(run_id_for(p) for p in paths))
                  + "</span>")
