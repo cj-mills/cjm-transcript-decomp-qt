@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from cjm_substrate_tui_kit.viewport import tail
-from cjm_transcript_decomp_core.runs import SourceRunIndex
+from cjm_transcript_decomp_core.runs import SourceRunIndex, TrainingRunIndex
 from cjm_transcript_decomp_core.segments import fmt_ts
 
 
@@ -448,3 +448,40 @@ def probe_detail(entry: Tuple[str, int, float],  # The focused display entry
                 + ("  · recovered span" if row.get("recovered") else "")
                 + ("  · ✂ split-minted" if row.get("split") else "") + "\n\n")
     return head + str(row.get("text") or "")
+
+
+def trainrun_rows(runs: List[Dict[str, Any]],     # TrainingRunIndex.runs (newest first)
+                  pin: Optional[str],             # Workspace-marker pin (run id or tail)
+                  pick: Optional[str],            # In-session pick (a run's _path) or None
+                  ) -> List[Dict[str, Any]]:
+    """One picker row per training run (work item a13ebc66): the manifest
+    facts TrainingRunIndex.describe reads, the EFFECTIVE model marked ● and
+    painted green (pick > pin > newest — the resolve_pick ladder), the pin
+    row chipped ← pin so the standing default stays visible while another
+    run is picked, and the head row chipped newest. Row index = position
+    in `runs`, so the dialog maps a cursor straight back to a manifest."""
+    rows: List[Dict[str, Any]] = []
+    pin_idx = next((i for i, m in enumerate(runs)
+                    if pin and (str(m.get("run_id") or "") == pin
+                                or str(m.get("run_id") or "").endswith(pin))),
+                   None)
+    pick_idx = next((i for i, m in enumerate(runs)
+                     if pick and m.get("_path") == pick), None)
+    effective = (pick_idx if pick_idx is not None else
+                 pin_idx if pin_idx is not None else
+                 0 if runs else None)
+    for i, m in enumerate(runs):
+        chunks = [("● " if i == effective else "  ")
+                  + TrainingRunIndex.describe(m)]
+        if i == pin_idx:
+            chunks.append("← pin")
+        if i == 0:
+            chunks.append("newest")
+        rows.append({"text": "  ".join(chunks),
+                     "style": "green" if i == effective else "",
+                     "index": i})
+    if not rows:
+        rows.append({"text": "(no training-run manifests found — the "
+                             "correction app's flywheel page trains one)",
+                     "style": "dim", "index": None})
+    return rows

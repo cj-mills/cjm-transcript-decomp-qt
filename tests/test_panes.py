@@ -177,3 +177,28 @@ def test_probe_rows_marks_recovered_and_split():
     assert "✂ (no words assigned — audition with r)" in seg_rows[1]["text"]
     detail = probe_detail(display[0], rows[0])
     assert detail.startswith("0:00.0 → 0:02.0") and "hello" in detail
+
+
+def test_trainrun_rows_marks_effective_pick_pin_and_newest():
+    """Work item a13ebc66: the picker rows mark the EFFECTIVE model ● green
+    by the resolve_pick ladder (pick > pin > newest), chip the pin row so
+    the standing default stays visible under a pick, chip the head row
+    newest, carry the manifest facts describe() reads, and paint a dim
+    placeholder for an empty index."""
+    from cjm_transcript_decomp_qt.panes import trainrun_rows
+    runs = [{"run_id": "trainrun_20260827_001206_b1072a9f", "_path": "/b",
+             "classes": ["speech", "inhale"], "dataset_id": "dataset_x_e53b8daa"},
+            {"run_id": "trainrun_20260810_113513_f4717dc5", "_path": "/f",
+             "classes": ["inhale"]}]
+    rows = trainrun_rows(runs, pin=None, pick=None)
+    assert [r["style"] for r in rows] == ["green", ""]
+    assert rows[0]["text"].startswith("● trainrun_20260827_001206_b1072a9f")
+    assert "newest" in rows[0]["text"] and "← pin" not in rows[0]["text"]
+    assert "ds …e53b8daa" in rows[0]["text"] and "[inhale]" in rows[1]["text"]
+    rows = trainrun_rows(runs, pin="f4717dc5", pick=None)
+    assert [r["style"] for r in rows] == ["", "green"] and "← pin" in rows[1]["text"]
+    rows = trainrun_rows(runs, pin="f4717dc5", pick="/b")
+    assert [r["style"] for r in rows] == ["green", ""]
+    assert "← pin" in rows[1]["text"] and rows[1]["text"].startswith("  ")
+    assert [r["index"] for r in rows] == [0, 1]
+    assert trainrun_rows([], None, None)[0]["style"] == "dim"

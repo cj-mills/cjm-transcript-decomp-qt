@@ -48,10 +48,11 @@ from .panes import (batch_html, config_diffs, decomp_header, decomp_rows, drill_
                     runs_header, segment_detail, segment_rows, segments_header_html,
                     vadform_header_html)
 from .session import DecompSession
+from .trainrun_picker import TrainingRunPicker
 
 HINTS = {
     "runs": "enter/space pick · t text-from · s split · Shift+R respine · "
-            "e event · Shift+E propset · Shift+P propose · v decomp runs · "
+            "e event · Shift+E propset · m model · Shift+P propose · v decomp runs · "
             "r reload · n confirm · q quit",
     "results": "enter open run · j/k walk · b back · q quit",
     "results_drill": "enter segments · j/k source · b decomp list · q quit",
@@ -107,6 +108,12 @@ class DecompWindow(QMainWindow):
         self.trainrun_index = TrainingRunIndex(training_runs_dir)
         self.propose_armed: Optional[Dict[str, Any]] = None
         self.propose_busy = False
+        # The propose-model pick for this sitting (a13ebc66): a run's _path,
+        # outranking the workspace pin in resolve_pick; never written back
+        # to cjm-workspace.yaml (its model-register comments survive).
+        self.training_run_pick: Optional[str] = None
+        self.trainrun_picker = TrainingRunPicker(
+            self, on_pick=self._on_trainrun_picked)
         self.stage = "runs"
         self.picked: List[str] = []          # ordered batch, keyed by _path
         self.text_from: Dict[str, str] = {}
@@ -148,6 +155,7 @@ class DecompWindow(QMainWindow):
         self._seg_pending: Optional[Tuple[Dict[str, Any], Dict[str, Any],
                                           List[str]]] = None
         self._armed_run: Optional[Dict[str, Any]] = None
+        self._armed_targets: List[Dict[str, Any]] = []
         self.sess = DecompSession(manifests_dir, graph_capability)
         self.sess.start()
         self._build_widgets()
@@ -283,7 +291,9 @@ class DecompWindow(QMainWindow):
             self.on_toggle_event_split, group="Proposals")
         add("cycle-propset", "Cycle propset", "Shift+E", self.on_cycle_propset,
             group="Proposals")
-        add("propose-missing", "Propose missing", "Shift+P",
+        add("pick-model", "Pick training run (propose model)", "M",
+            self.on_pick_model, group="Proposals")
+        add("propose-missing", "Propose (picked; regenerates)", "Shift+P",
             self.on_propose_missing, group="Proposals")
         add("slower", "Playback slower", "[", lambda: self.nudge_speed(-0.25),
             group="Audio")
@@ -443,8 +453,11 @@ class DecompWindow(QMainWindow):
         if self.graph_db_path:
             chip += (f"<span style='color:#8a9299'>@"
                      f"{tail(self.graph_db_path, 28)} </span>")
-        self.strip.set_chips([("stage", self.stage.upper()),
-                              ("journal", chip)])
+        chips = [("stage", self.stage.upper()), ("journal", chip)]
+        model = self._model_chip()
+        if model:
+            chips.append(("model", model))
+        self.strip.set_chips(chips)
         hints_key = ("results_drill" if self.stage == "results"
                      and self.results_run is not None else self.stage)
         if self.error:
@@ -543,13 +556,17 @@ class DecompWindow(QMainWindow):
         return PropsetIndex.summary(chosen) if chosen else tail(ps, 20)
 
     def _propose_targets(self) -> List[Dict[str, Any]]:
-        """Picked single-source runs whose source resolves NO propset — the
-        exact set the event-armed confirm guard would refuse."""
+        """Picked single-source runs, one per source — sources that ALREADY
+        have a set included: a propose always mints a NEW versioned set
+        beside the old ones (work item 53911bef, coexist — the capability
+        mints a fresh proposal_set_id per invocation and Shift+E cycles a
+        source's sets newest-first), so regenerating with a newer model no
+        longer needs a shell delete of the prior set."""
         out: List[Dict[str, Any]] = []
         seen: set = set()
         for p in self.picked:
             m = self._run_by_path(p)
-            if m is None or self._resolved_propset(m) is not None:
+            if m is None:
                 continue
             srcs = m.get("sources") or []
             if len(srcs) != 1:
@@ -731,7 +748,9 @@ class DecompWindow(QMainWindow):
             if current in paths else paths[0]
         self.propset_pick[m["_path"]] = nxt
         chosen = next(s for s in sets if s["_path"] == nxt)
-        self.notice = f"propset → {PropsetIndex.summary(chosen)}"
+        self.notice = (f"propset → {PropsetIndex.summary(chosen)} · model "
+                       f"…{str(chosen.get('training_run_id') or '?')[-8:]} "
+                       f"({paths.index(nxt) + 1}/{len(paths)}, newest first)")
         self._paint_runs()
         self._refresh_status()
 
@@ -765,9 +784,12 @@ class DecompWindow(QMainWindow):
 
     def on_propose_missing(self) -> None:
         """Shift+P (DEC 1cfe6d0f): propose over every picked event-armed
-        source with no propset. TWO-STEP: the first press names the resolved
-        model, the second runs it — a wrong model burns a walk session
-        (b9717422), so the human stays between resolution and inference."""
+        source — a source that already has a set gets a NEW one beside it
+        (53911bef coexist; the fresh set becomes that source's default).
+        TWO-STEP: the first press names the resolved model and the fresh/
+        regenerate split, the second runs it — a wrong model burns a walk
+        session (b9717422), so the human stays between resolution and
+        inference."""
         if self.stage != "runs" or self.propose_busy or self.busy:
             return
         if not self.event_split:
@@ -786,32 +808,72 @@ class DecompWindow(QMainWindow):
                                           progress=self.progress_note.emit)
             fut.add_done_callback(self.propose_done.emit)
             self._armed_run = armed["run"]
+            self._armed_targets = list(armed["targets"])
             return
         targets = self._propose_targets()
         if not targets:
-            self.error = ("every picked run already resolves a propset"
-                          if self.picked else
+            self.error = ("picked runs are multi-source — propose serves "
+                          "single-source runs" if self.picked else
                           "pick runs first — propose serves the picked batch")
             self._refresh_status()
             return
         self.trainrun_index.load()
-        run = self.trainrun_index.resolve(self.training_run_pin)
+        run, why = self.trainrun_index.resolve_pick(self.training_run_pick,
+                                                    self.training_run_pin)
         if run is None:
-            self.error = (f"training-run pin {self.training_run_pin!r} "
-                          f"matches nothing under "
-                          f"{self.trainrun_index.training_runs_dir}"
-                          if self.training_run_pin else
-                          f"no training runs under "
-                          f"{self.trainrun_index.training_runs_dir}")
+            self.error = why
             self._refresh_status()
             return
+        regen = sum(1 for m in targets
+                    if self._resolved_propset(m) is not None)
         self.propose_armed = {"run": run, "targets": targets}
         self.error = None
         self.notice = (f"Shift+P again: propose {len(targets)} source(s) with "
-                       f"{TrainingRunIndex.summary(run)}"
-                       + ("" if self.training_run_pin else
-                          " — newest run, no pin"))
+                       f"{TrainingRunIndex.summary(run)} — {why}"
+                       + (f" · {regen} regenerate (a new set beside the old; "
+                          f"Shift+E cycles)" if regen else "")
+                       + "; m picks another run")
         self._refresh_status()
+
+    def on_pick_model(self) -> None:
+        """m (work item a13ebc66): the training-run picker — choose the
+        propose model in-app. The pick is session-scoped and outranks the
+        workspace marker's pin (resolve_pick: pick > pin > newest); the yaml
+        pin demotes to the fallback default and is never rewritten, so its
+        model-register comments survive. Any armed Shift+P confirm is
+        dropped on pick — the model it named may no longer be the one."""
+        if self.stage != "runs" or self.propose_busy or self.busy:
+            return
+        self.trainrun_index.load()
+        if not self.trainrun_index.runs:
+            self.error = (f"no training runs under "
+                          f"{self.trainrun_index.training_runs_dir}")
+            self._refresh_status()
+            return
+        self.trainrun_picker.open_for(self.trainrun_index.runs,
+                                      self.training_run_pin,
+                                      self.training_run_pick)
+
+    def _on_trainrun_picked(self, run: Dict[str, Any]) -> None:
+        self.training_run_pick = run["_path"]
+        self.propose_armed = None
+        self.error = None
+        self.notice = (f"propose model → {TrainingRunIndex.summary(run)} "
+                       f"(picked for this sitting; Shift+P proposes with it)")
+        self._refresh_status()
+
+    def _model_chip(self) -> Optional[str]:
+        """The strip's model chip: the run Shift+P would propose with and
+        why (picked/pin/newest), or the loud miss — only while event-split
+        is armed, since propose serves event-armed runs."""
+        if not self.event_split:
+            return None
+        run, why = self.trainrun_index.resolve_pick(self.training_run_pick,
+                                                    self.training_run_pin)
+        if run is None:
+            return "⚠ no model"
+        tag = {"picked": "picked", "workspace pin": "pin"}.get(why, "newest")
+        return f"{str(run.get('run_id') or '?')[-8:]} ({tag})"
 
     def _on_propose_done(self, fut) -> None:
         self.propose_busy = False
@@ -827,6 +889,11 @@ class DecompWindow(QMainWindow):
             self.error = None
             self.notice = (f"⚡ {res['landed']} propset(s) landed with "
                            f"{TrainingRunIndex.summary(self._armed_run)}")
+        # A regenerated source's fresh set is its new default (53911bef):
+        # drop the operator's older Shift+E pick so latest-per-source rules
+        # again — an older generation stays one Shift+E away.
+        for m in self._armed_targets:
+            self.propset_pick.pop(m["_path"], None)
         self._reload_indexes()
         if self.stage == "runs":
             self._paint_runs()
