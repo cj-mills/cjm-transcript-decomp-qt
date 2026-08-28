@@ -66,3 +66,80 @@ def test_picker_parks_cursor_on_effective_model_and_picks():
     dlg.keyPressEvent(_key(Qt.Key_Return))
     assert len(picked) == 1
     dlg.close()
+
+
+def test_picker_lifecycle_verbs_archive_toggle_and_delete_two_step():
+    """Work item b20cb911 (DEC 14678fc9): archived runs stay hidden until h,
+    paint dim with a ⌂ chip and are never pickable; a hands the cursored run
+    + verb to on_lifecycle and repaints from the lists it returns (cursor
+    kept); x arms on an archived row only and deletes on the second press,
+    any other key cancels; the hook's note rides the foot."""
+    QApplication.instance() or QApplication(sys.argv[:1])
+    picked, calls = [], []
+    state = {"runs": _runs()[:2],
+             "archived": [dict(_runs()[2], _lifecycle="archived")]}
+
+    def hook(run, verb):
+        calls.append((run["run_id"][-8:], verb))
+        keep = lambda rows: [r for r in rows if r["_path"] != run["_path"]]
+        if verb == "archive":
+            state["runs"] = keep(state["runs"])
+            state["archived"] = state["archived"] + [dict(run, _lifecycle="archived")]
+            note = f"…{run['run_id'][-8:]} archived"
+        elif verb == "unarchive":
+            state["archived"] = keep(state["archived"])
+            state["runs"] = state["runs"] + [dict(run, _lifecycle="active")]
+            note = f"…{run['run_id'][-8:]} active"
+        else:
+            state["archived"] = keep(state["archived"])
+            note = f"deleted …{run['run_id'][-8:]}"
+        return state["runs"], state["archived"], note
+
+    dlg = TrainingRunPicker(None, on_pick=picked.append, on_lifecycle=hook)
+    dlg.open_for(state["runs"], pin="f4717dc5", archived=state["archived"])
+    assert dlg.list.count() == 2
+    assert "1 archived (h shows)" in dlg.head.toPlainText()
+    dlg.keyPressEvent(_key(Qt.Key_H, "h"))
+    assert dlg.list.count() == 3 and "⌂ archived" in dlg.list.item(2).text()
+    assert "1 archived (shown)" in dlg.head.toPlainText()
+    # archived rows are not pickable
+    dlg.list.setCurrentRow(2)
+    dlg.keyPressEvent(_key(Qt.Key_Return))
+    assert picked == [] and dlg.isVisible() and "not pickable" in dlg.foot.text()
+    # a on an archived row unarchives; on an active row archives
+    dlg.keyPressEvent(_key(Qt.Key_A, "a"))
+    assert calls[-1] == ("6f803b12", "unarchive") and dlg.list.count() == 3
+    assert "…6f803b12 active" in dlg.foot.text()
+    assert "⌂ archived" not in dlg.list.item(2).text()
+    dlg.list.setCurrentRow(0)
+    dlg.keyPressEvent(_key(Qt.Key_A, "a"))
+    assert calls[-1] == ("b1072a9f", "archive")
+    assert dlg.list.count() == 3          # shown: 2 active + the fresh archive
+    assert "⌂ archived" in dlg.list.item(2).text()
+    # the cursor stays put; the pin row is now the effective head
+    assert dlg.list.currentRow() == 0 and dlg.list.item(0).text().startswith("● ")
+    assert "← pin" in dlg.list.item(0).text() and "newest" in dlg.list.item(0).text()
+    # x: refused on an active row, two-step on an archived one, other keys cancel
+    dlg.keyPressEvent(_key(Qt.Key_X, "x"))
+    assert "ARCHIVED runs only" in dlg.foot.text() and dlg._delete_armed is None
+    dlg.list.setCurrentRow(2)
+    dlg.keyPressEvent(_key(Qt.Key_X, "x"))
+    assert dlg._delete_armed == "/ws/b" and "again: DELETE" in dlg.foot.text()
+    dlg.keyPressEvent(_key(Qt.Key_K, "k"))
+    assert dlg._delete_armed is None and dlg.list.currentRow() == 1
+    dlg.list.setCurrentRow(2)
+    dlg.keyPressEvent(_key(Qt.Key_X, "x"))
+    dlg.keyPressEvent(_key(Qt.Key_X, "x"))
+    assert calls[-1] == ("b1072a9f", "delete") and dlg.list.count() == 2
+    assert "deleted …b1072a9f" in dlg.foot.text()
+    # h hides the (now empty) archived side again
+    dlg.keyPressEvent(_key(Qt.Key_H, "h"))
+    assert dlg.list.count() == 2 and not dlg.show_archived
+    assert "archived" not in dlg.head.toPlainText()
+    dlg.close()
+    # no hook wired: a is a silent no-op
+    bare = TrainingRunPicker(None, on_pick=picked.append)
+    bare.open_for(_runs())
+    bare.keyPressEvent(_key(Qt.Key_A, "a"))
+    assert bare.list.count() == 3 and bare.foot.text()
+    bare.close()

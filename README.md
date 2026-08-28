@@ -11,6 +11,7 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 - **`cjm_transcript_decomp_qt.cli`** — Console-script driver for the Qt shell: the SAME argument surface,
 - **`cjm_transcript_decomp_qt.panes`** — Pure row/label builders for the decomp Qt shell — the paint logic, Qt-free.
 - **`cjm_transcript_decomp_qt.session`** — One read-only decomp inspection seat + the propose pre-stage behind a
+- **`cjm_transcript_decomp_qt.trainrun_picker`**
 
 ## API
 
@@ -43,6 +44,7 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 - `segment_detail` _function_ — The focused entry IN FULL as plain text (setPlainText — no truncation,
 - `segment_rows` _function_ — The committed fine spine with FOCUSABLE interleaved gap rows — the gap
 - `segments_header_html` _function_ — The drilled source's headline: row/gap/missing counts + the recorded
+- `trainrun_rows` _function_ — One picker row per training run (work item a13ebc66): the manifest
 - `vadform_header_html` _function_ — Form headline + the probe-only doctrine + the split-preview state.
 
 ### `cjm_transcript_decomp_qt.session`

@@ -23,6 +23,8 @@ probes. No blocked-reason poll: decomp loads no heavy comparison stack."""
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from cjm_substrate.utils.lifecycle import (artifact_id, ArtifactLifecycle, find_holders,
+                                           LifecycleRefusal)
 from cjm_substrate_qt_kit.findbar import FindBar
 from cjm_substrate_qt_kit.keyhints import KeyHintsOverlay
 from cjm_substrate_qt_kit.keymap import KeymapRegistry
@@ -52,7 +54,8 @@ from .trainrun_picker import TrainingRunPicker
 
 HINTS = {
     "runs": "enter/space pick · t text-from · s split · Shift+R respine · "
-            "e event · Shift+E propset · m model · Shift+P propose · v decomp runs · "
+            "e event · Shift+E propset · Shift+X archive · m model · Shift+P propose · "
+            "v decomp runs · "
             "r reload · n confirm · q quit",
     "results": "enter open run · j/k walk · b back · q quit",
     "results_drill": "enter segments · j/k source · b decomp list · q quit",
@@ -114,7 +117,11 @@ class DecompWindow(QMainWindow):
         # to cjm-workspace.yaml (its model-register comments survive).
         self.training_run_pick: Optional[str] = None
         self.trainrun_picker = TrainingRunPicker(
-            self, on_pick=self._on_trainrun_picked)
+            self, on_pick=self._on_trainrun_picked,
+            on_lifecycle=self._on_trainrun_lifecycle)
+        # The Shift+X two-step (b20cb911): the propset path the first press
+        # named; the second press archives it. Any reload drops it.
+        self.archive_armed: Optional[str] = None
         self.stage = "runs"
         self.picked: List[str] = []          # ordered batch, keyed by _path
         self.text_from: Dict[str, str] = {}
@@ -296,6 +303,8 @@ class DecompWindow(QMainWindow):
             self.on_pick_model, group="Proposals")
         add("propose-missing", "Propose (picked; regenerates)", "Shift+P",
             self.on_propose_missing, group="Proposals")
+        add("archive-propset", "Archive propset (two-step)", "Shift+X",
+            self.on_archive_propset, group="Proposals")
         add("slower", "Playback slower", "[", lambda: self.nudge_speed(-0.25),
             group="Audio")
         add("faster", "Playback faster", "]", lambda: self.nudge_speed(0.25),
@@ -522,6 +531,7 @@ class DecompWindow(QMainWindow):
         self.propset_index.load()
         self.trainrun_index.load()
         self.propose_armed = None  # any reload invalidates an armed confirm
+        self.archive_armed = None  # … and an armed Shift+X
         self._decomp_counts = self.dec_index.counts_by_source_manifest()
         # A reload may evict manifests the batch still names; drop those picks
         # rather than hand off paths the core would refuse.
@@ -556,6 +566,8 @@ class DecompWindow(QMainWindow):
         out: List[Optional[str]] = []
         for i, sets in enumerate(self._propsets_for(m)):
             pick = self.propset_pick.get(self._source_key(m, i))
+            if pick and not any(s["_path"] == pick for s in sets):
+                pick = None  # the picked set was archived (Shift+X) or evicted
             out.append(pick or (sets[0]["_path"] if sets else None))
         return out
 
@@ -891,14 +903,15 @@ class DecompWindow(QMainWindow):
         if self.stage != "runs" or self.propose_busy or self.busy:
             return
         self.trainrun_index.load()
-        if not self.trainrun_index.runs:
+        if not self.trainrun_index.runs and not self.trainrun_index.archived:
             self.error = (f"no training runs under "
                           f"{self.trainrun_index.training_runs_dir}")
             self._refresh_status()
             return
         self.trainrun_picker.open_for(self.trainrun_index.runs,
                                       self.training_run_pin,
-                                      self.training_run_pick)
+                                      self.training_run_pick,
+                                      archived=self.trainrun_index.archived)
 
     def _on_trainrun_picked(self, run: Dict[str, Any]) -> None:
         self.training_run_pick = run["_path"]
@@ -906,6 +919,92 @@ class DecompWindow(QMainWindow):
         self.error = None
         self.notice = (f"propose model → {TrainingRunIndex.summary(run)} "
                        f"(picked for this sitting; Shift+P proposes with it)")
+        self._refresh_status()
+
+    def _on_trainrun_lifecycle(self, run: Dict[str, Any],
+                               verb: str) -> Tuple[List[Dict[str, Any]],
+                                                   List[Dict[str, Any]], str]:
+        """a / x in the m picker (b20cb911, DEC 14678fc9): archive, unarchive
+        or delete the cursored run through the substrate lifecycle seam — a
+        sidecar beside the manifest, never the manifest itself. Archive is
+        reversible visibility (the run leaves the ladder; a pin or pick on
+        it turns into a loud miss); delete serves an ARCHIVED run nothing
+        under the workspace still names (a propset's training_run_id, the
+        yaml pin) — the refusal names each holder. Hands the picker its
+        refreshed lists + the note its foot echoes."""
+        lc = ArtifactLifecycle(Path(run["_path"]).parent)
+        rid = str(run.get("run_id") or "?")[-8:]
+        try:
+            if verb == "delete":
+                root = Path(self.trainrun_index.training_runs_dir).parent
+                holders = find_holders(root, artifact_id(lc.dir), exclude_dir=lc.dir)
+                lc.delete(holders=holders)
+                if self.training_run_pick == run["_path"]:
+                    self.training_run_pick = None
+                note = f"deleted …{rid}"
+            else:
+                rec, changed = getattr(lc, verb)(
+                    actor="user:decomp-qt",
+                    reason=f"{verb}d in the decomp app (m picker)")
+                note = f"…{rid} {rec['state']}" + ("" if changed else " (already)")
+        except LifecycleRefusal as e:
+            note = f"refused: {e}"
+        self.trainrun_index.load()
+        self.propose_armed = None
+        self.notice = note
+        self._refresh_status()
+        return self.trainrun_index.runs, self.trainrun_index.archived, note
+
+    def on_archive_propset(self) -> None:
+        """Shift+X (b20cb911, DEC 14678fc9): archive the focused run's
+        EFFECTIVE proposal set — the source Shift+E last parked on, else
+        source 0 — through the lifecycle sidecar: the set leaves every ring
+        and the source's default falls to its next-newest set (or 'no set');
+        the manifest stays on disk (the lifecycle CLI lists / unarchives it).
+        TWO-STEP like Shift+P: the first press names the set."""
+        if (self.stage != "runs" or not self.event_split or self.busy
+                or self.propose_busy):
+            return
+        m = self._focused_run()
+        if m is None:
+            return
+        if self.propset_pin:
+            self.notice = "propset pinned by --event-propset — archive disabled"
+            self._refresh_status()
+            return
+        rings = self._propsets_for(m)
+        resolved = self._resolved_propsets(m)
+        pairs = [(i, s) for i, sets in enumerate(rings) for s in sets]
+        cur = self.propset_cursor.get(m["_path"])
+        i = pairs[cur][0] if cur is not None and cur < len(pairs) else 0
+        target = resolved[i] if i < len(resolved) else None
+        chosen = (next((s for s in rings[i] if s["_path"] == target), None)
+                  if target else None)
+        if chosen is None:
+            self.archive_armed = None
+            self.notice = "no proposal set to archive for this source"
+            self._refresh_status()
+            return
+        label = (f"{PropsetIndex.summary(chosen)} · model "
+                 f"…{str(chosen.get('training_run_id') or '?')[-8:]}")
+        if self.archive_armed != target:
+            self.archive_armed = target
+            self.notice = (f"Shift+X again: archive propset {label} — leaves "
+                           f"the ring, stays on disk ({len(rings[i]) - 1} other "
+                           f"set(s) for this source)")
+            self._refresh_status()
+            return
+        self.archive_armed = None
+        ArtifactLifecycle(Path(target).parent).archive(
+            actor="user:decomp-qt", reason="archived in the decomp app (Shift+X)")
+        self.propset_pick.pop(self._source_key(m, i), None)
+        self.propset_cursor.pop(m["_path"], None)
+        self._reload_indexes()
+        left = len(self._propsets_for(m)[i]) if i < len(rings) else 0
+        self.notice = (f"archived propset {label} — {left} set(s) remain for "
+                       f"this source; python -m cjm_substrate.utils.lifecycle "
+                       f"unarchives")
+        self._paint_runs()
         self._refresh_status()
 
     def _model_chip(self) -> Optional[str]:

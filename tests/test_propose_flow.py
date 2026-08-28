@@ -190,3 +190,56 @@ def test_multi_source_run_proposes_per_source_and_carries_one_pointer_each(windo
     # the hand-off fold keys on the tuple; the plan carries a list
     (key, paths), = w._batches()
     assert key[2] == ps and paths == [ab["_path"]]
+
+
+def test_lifecycle_archive_propset_and_archived_pin_are_loud(window, tmp_path):
+    """Work item b20cb911 (DEC 14678fc9): Shift+X archives the focused run's
+    effective propset behind a two-step — the set leaves the ring (the
+    row's chip goes to None, a Shift+E pick on it is dropped) but stays on
+    disk beside a lifecycle.json; the m picker's a/x verbs drive the same
+    seam through the window hook; a workspace pin on an ARCHIVED run is a
+    loud miss naming the archive, never a silent fall-through; delete
+    refuses while a propset still names the run."""
+    w = window
+    run_a = w.src_index.runs[0]                          # has propset_old
+    w.runs_list.setCurrentRow(0)
+    assert w._focused_run() is run_a
+    assert w._resolved_propset(run_a) is not None
+    w.propset_pick[w._source_key(run_a, 0)] = w._propsets_for(run_a)[0][0]["_path"]
+    w.on_archive_propset()                               # first press arms
+    assert w.archive_armed and "Shift+X again" in w.notice
+    assert "11111111" in w.notice and "0 other set(s)" in w.notice
+    w.on_archive_propset()                               # second press archives
+    assert w.archive_armed is None and w.notice.startswith("archived propset")
+    assert "0 set(s) remain" in w.notice
+    assert w._resolved_propset(run_a) is None and w._propset_chip(run_a) is None
+    assert w._source_key(run_a, 0) not in w.propset_pick
+    assert [m["proposal_set_id"] for m in w.propset_index.archived] \
+        == ["propset_old_11111111"]
+    assert (tmp_path / "proposals" / "propset_old" / "lifecycle.json").exists()
+    assert (tmp_path / "proposals" / "propset_old" / "manifest.json").exists()
+    w.on_archive_propset()                               # nothing left
+    assert "no proposal set to archive" in w.notice
+    # the picker hook: archive the PINNED run -> the pin misses LOUD
+    pinned = next(m for m in w.trainrun_index.runs if m["run_id"].endswith("6f803b12"))
+    runs, archived, note = w._on_trainrun_lifecycle(pinned, "archive")
+    assert [m["run_id"][-8:] for m in runs] == ["b1072a9f"]
+    assert [m["run_id"][-8:] for m in archived] == ["6f803b12"]
+    assert note == "…6f803b12 archived" and w._model_chip() == "⚠ no model"
+    w.picked = [w.src_index.runs[1]["_path"]]
+    w.on_propose_missing()
+    assert w.propose_armed is None and "ARCHIVED" in w.error
+    # m still opens (archived runs exist), listing the active run until h
+    w.on_pick_model()
+    assert w.trainrun_picker.isVisible() and w.trainrun_picker.list.count() == 1
+    assert len(w.trainrun_picker.archived) == 1
+    w.trainrun_picker.reject()
+    # delete refuses while a propset names the run; unarchive restores the pin
+    runs, archived, note = w._on_trainrun_lifecycle(archived[0], "delete")
+    assert note.startswith("refused:") and "propset_old" in note
+    assert len(archived) == 1 and (tmp_path / "training-runs" / "trainrun_1_6f803b12").exists()
+    runs, archived, note = w._on_trainrun_lifecycle(archived[0], "unarchive")
+    assert note == "…6f803b12 active" and len(runs) == 2 and archived == []
+    assert w._model_chip() == "6f803b12 (pin)"
+    runs, archived, note = w._on_trainrun_lifecycle(runs[0], "unarchive")
+    assert note.endswith("(already)")

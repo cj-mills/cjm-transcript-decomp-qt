@@ -476,18 +476,29 @@ def trainrun_rows(runs: List[Dict[str, Any]],     # TrainingRunIndex.runs (newes
                    None)
     pick_idx = next((i for i, m in enumerate(runs)
                      if pick and m.get("_path") == pick), None)
+    # Archived runs (lifecycle sidecar, b20cb911) ride the list only when
+    # the picker shows them: dimmed, chipped, never the effective model —
+    # a pin or pick that lands on one is the index's loud miss, not a ●.
+    archived = {i for i, m in enumerate(runs) if m.get("_lifecycle") == "archived"}
+    if pin_idx in archived:
+        pin_idx = None
+    if pick_idx in archived:
+        pick_idx = None
+    head = next((i for i in range(len(runs)) if i not in archived), None)
     effective = (pick_idx if pick_idx is not None else
-                 pin_idx if pin_idx is not None else
-                 0 if runs else None)
+                 pin_idx if pin_idx is not None else head)
     for i, m in enumerate(runs):
         chunks = [("● " if i == effective else "  ")
                   + TrainingRunIndex.describe(m)]
         if i == pin_idx:
             chunks.append("← pin")
-        if i == 0:
+        if i == head:
             chunks.append("newest")
+        if i in archived:
+            chunks.append("⌂ archived")
         rows.append({"text": "  ".join(chunks),
-                     "style": "green" if i == effective else "",
+                     "style": ("green" if i == effective else
+                               "dim" if i in archived else ""),
                      "index": i})
     if not rows:
         rows.append({"text": "(no training-run manifests found — the "
