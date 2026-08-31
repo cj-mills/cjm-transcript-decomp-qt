@@ -11,7 +11,8 @@ imported spine (SourceRunIndex / DecompIndex / PropsetIndex / TrainingRunIndex
 DecompSession, whose loop thread owns the read-only graph seat and the
 propose seat. This module materializes row dicts from panes.py into Qt
 widgets and forwards the VERBATIM Textual key vocabulary (j/k, enter/space,
-t, v, r, n, b, c, p, s, Shift+R respine, e, Shift+E propset, Shift+P propose,
+t, v, r, n, b, c, p, s, Shift+R respine, e, Shift+E propset, x propset
+lifecycle picker, Shift+X archive, m model, Shift+P propose,
 [ ], escape, q — stage-dispatched exactly like the Textual actions). Text
 entry rides modal QInputDialogs; detail text paints setPlainText.
 
@@ -49,13 +50,14 @@ from .panes import (batch_html, config_diffs, decomp_header, decomp_rows, drill_
                     probe_target_html, probeview_header_html, run_detail_html, run_rows,
                     runs_header, segment_detail, segment_rows, segments_header_html,
                     vadform_header_html)
+from .propset_picker import PropsetPicker
 from .session import DecompSession
 from .trainrun_picker import TrainingRunPicker
 
 HINTS = {
     "runs": "enter/space pick · t text-from · s split · Shift+R respine · "
-            "e event · Shift+E propset · Shift+X archive · m model · Shift+P propose · "
-            "v decomp runs · "
+            "e event · Shift+E propset · x propsets · Shift+X archive · "
+            "m model · Shift+P propose · v decomp runs · "
             "r reload · n confirm · q quit",
     "results": "enter open run · j/k walk · b back · q quit",
     "results_drill": "enter segments · j/k source · b decomp list · q quit",
@@ -119,6 +121,13 @@ class DecompWindow(QMainWindow):
         self.trainrun_picker = TrainingRunPicker(
             self, on_pick=self._on_trainrun_picked,
             on_lifecycle=self._on_trainrun_lifecycle)
+        # The propset lifecycle picker (b20cb911's unarchive rung): x lists
+        # the cursor source's sets INCLUDING archived — the Shift+E ring
+        # alone can never show one to unarchive.
+        self.propset_picker = PropsetPicker(
+            self, on_pick=self._on_propset_picked,
+            on_lifecycle=self._on_propset_lifecycle)
+        self._propset_picker_ctx: Optional[Tuple[str, int]] = None
         # The Shift+X two-step (b20cb911): the propset path the first press
         # named; the second press archives it. Any reload drops it.
         self.archive_armed: Optional[str] = None
@@ -305,6 +314,8 @@ class DecompWindow(QMainWindow):
             self.on_propose_missing, group="Proposals")
         add("archive-propset", "Archive propset (two-step)", "Shift+X",
             self.on_archive_propset, group="Proposals")
+        add("propset-picker", "Proposal sets (lifecycle picker)", "X",
+            self.on_propset_picker, group="Proposals")
         add("slower", "Playback slower", "[", lambda: self.nudge_speed(-0.25),
             group="Audio")
         add("faster", "Playback faster", "]", lambda: self.nudge_speed(0.25),
@@ -954,6 +965,109 @@ class DecompWindow(QMainWindow):
         self.notice = note
         self._refresh_status()
         return self.trainrun_index.runs, self.trainrun_index.archived, note
+
+    def on_propset_picker(self) -> None:
+        """x (b20cb911's unarchive rung, on the 8d29f0f0 kit shell): the
+        focused run's cursor-source proposal sets as a lifecycle picker —
+        the Shift+E ring never lists an ARCHIVED set, so unarchive needs
+        this listing. The cursor source = the one Shift+E last parked on,
+        else source 0 (the on_archive_propset rule)."""
+        if self.stage != "runs" or not self.event_split or self.busy:
+            return
+        m = self._focused_run()
+        if m is None:
+            return
+        if self.propset_pin:
+            self.notice = "propset pinned by --event-propset — picker disabled"
+            self._refresh_status()
+            return
+        srcs = m.get("sources") or []
+        if not srcs:
+            return
+        rings = self._propsets_for(m)
+        pairs = [(i, s) for i, sets in enumerate(rings) for s in sets]
+        cur = self.propset_cursor.get(m["_path"])
+        i = pairs[cur][0] if cur is not None and cur < len(pairs) else 0
+        i = min(i, len(srcs) - 1)
+        self._propset_picker_ctx = (m["_path"], i)
+        resolved = self._resolved_propsets(m)
+        self.propset_picker.open_for(
+            Path(str(srcs[i].get("source_path") or "?")).name,
+            rings[i] if i < len(rings) else [],
+            archived=self._archived_propsets_for_source(srcs[i]),
+            effective=resolved[i] if i < len(resolved) else None)
+
+    def _archived_propsets_for_source(self, s: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """The ARCHIVED sets bound to one run source — the for_source join
+        applied to the index's archived half (for_source itself reads only
+        the active sets, deliberately: rings never see archived)."""
+        ch = str(s.get("content_hash") or "") or None
+        sp = str(s.get("source_path") or "") or None
+        out: List[Dict[str, Any]] = []
+        for m in self.propset_index.archived:
+            src = m.get("source") or {}
+            if ((ch and src.get("content_hash") == ch)
+                    or (sp and str(src.get("path") or "") == sp)):
+                out.append(m)
+        return out
+
+    def _on_propset_picked(self, chosen: Dict[str, Any]) -> None:
+        """A pick lands in the Shift+E slot (session-scoped, like the model
+        pick): that source's effective set until re-picked or archived."""
+        ctx = self._propset_picker_ctx
+        if ctx is None:
+            return
+        run_path, i = ctx
+        m = self._run_by_path(run_path)
+        if m is None:
+            return
+        self.propset_pick[self._source_key(m, i)] = chosen["_path"]
+        self.propset_cursor.pop(run_path, None)
+        self.archive_armed = None
+        self.error = None
+        self.notice = (f"propset → {PropsetIndex.summary(chosen)} "
+                       f"(picked for this sitting)")
+        self._paint_runs()
+        self._refresh_status()
+
+    def _on_propset_lifecycle(self, chosen: Dict[str, Any],
+                              verb: str) -> Tuple[List[Dict[str, Any]],
+                                                  List[Dict[str, Any]], str]:
+        """a / x in the propset picker: archive, unarchive or delete the
+        cursored set through the substrate lifecycle seam (the
+        _on_trainrun_lifecycle contract) — hands the picker its refreshed
+        source-scoped lists + the note its foot echoes."""
+        ctx = self._propset_picker_ctx
+        lc = ArtifactLifecycle(Path(str(chosen.get("_path") or "")).parent)
+        sid = str(chosen.get("proposal_set_id") or "?")[-8:]
+        try:
+            if verb == "delete":
+                root = Path(self.propset_index.proposals_dir).parent
+                holders = find_holders(root, artifact_id(lc.dir),
+                                       exclude_dir=lc.dir)
+                lc.delete(holders=holders)
+                note = f"deleted …{sid}"
+            else:
+                rec, changed = getattr(lc, verb)(
+                    actor="user:decomp-qt",
+                    reason=f"{verb}d in the decomp app (propset picker)")
+                note = f"…{sid} {rec['state']}" + ("" if changed else " (already)")
+        except LifecycleRefusal as e:
+            note = f"refused: {e}"
+        self._reload_indexes()
+        self.archive_armed = None
+        sets: List[Dict[str, Any]] = []
+        archived: List[Dict[str, Any]] = []
+        if ctx is not None:
+            m = self._run_by_path(ctx[0])
+            srcs = (m.get("sources") or []) if m is not None else []
+            if m is not None and ctx[1] < len(srcs):
+                sets = self._propsets_for_source(srcs[ctx[1]])
+                archived = self._archived_propsets_for_source(srcs[ctx[1]])
+        self.notice = note
+        self._paint_runs()
+        self._refresh_status()
+        return sets, archived, note
 
     def on_archive_propset(self) -> None:
         """Shift+X (b20cb911, DEC 14678fc9): archive the focused run's
