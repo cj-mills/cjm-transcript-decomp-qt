@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cjm-transcript-decomp-qt"
-version = "0.0.6"
+version = "0.0.7"
 description = "Qt shell for the decomp-batch setup app — the second workflow TUI migrated to the PySide6 lane (DEC c4b0d6e5): the same batch queueing over transcription-run manifests, decomp-results drill with interleaved gap rows, VAD/FA probe views, and headless hand-off as cjm-transcript-decomp-tui, whose pure spine modules and CLI ladder it imports; the read-only graph seat and probe/propose jobs run under a Qt event loop via a private asyncio loop thread (DecompSession). Born on-graph."
 readme = "README.md"
 requires-python = ">=3.12"

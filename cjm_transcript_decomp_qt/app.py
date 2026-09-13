@@ -35,8 +35,8 @@ from cjm_substrate_qt_kit.style import apply_row_style
 from cjm_substrate_qt_kit.theme import style_text_pane
 from cjm_substrate_tui_kit.form import ConfigForm
 from cjm_substrate_tui_kit.viewport import tail
-from cjm_transcript_decomp_core.runs import (DecompIndex, group_batches, PropsetIndex,
-                                             SourceRunIndex, TrainingRunIndex)
+from cjm_transcript_decomp_core.runs import (DecompIndex, group_batches, is_external_transcriber,
+                                             PropsetIndex, SourceRunIndex, TrainingRunIndex)
 from cjm_transcript_decomp_core.segments import (aseg_index_for, build_display,
                                                  capability_config_schema, fmt_ts, locate_span,
                                                  predicted_rows, probe_compare, realign_rows,
@@ -689,9 +689,11 @@ class DecompWindow(QMainWindow):
         m = self._focused_run()
         if m is None:
             return
-        ts = SourceRunIndex.transcribers(m)
+        # External landings (`<model id>/manual`) never cycle into the
+        # authority slot — they carry text only on escalated chunks.
+        ts = [t for t in SourceRunIndex.transcribers(m) if not is_external_transcriber(t)]
         if len(ts) < 2:
-            self.notice = ("single-transcriber run — text-from is its sole "
+            self.notice = ("single local transcriber — text-from is its sole "
                            "transcriber")
             self._refresh_status()
             return
