@@ -10,8 +10,9 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 - **`cjm_transcript_decomp_qt.app`** — The Qt decomp-batch shell: the same batch queueing over transcription-run
 - **`cjm_transcript_decomp_qt.cli`** — Console-script driver for the Qt shell: the SAME argument surface,
 - **`cjm_transcript_decomp_qt.panes`** — Pure row/label builders for the decomp Qt shell — the paint logic, Qt-free.
+- **`cjm_transcript_decomp_qt.propset_picker`** — Modal proposal-set lifecycle picker (the b20cb911 propset-unarchive
 - **`cjm_transcript_decomp_qt.session`** — One read-only decomp inspection seat + the propose pre-stage behind a
-- **`cjm_transcript_decomp_qt.trainrun_picker`**
+- **`cjm_transcript_decomp_qt.trainrun_picker`** — Modal training-run picker for the propose pre-stage (work item a13ebc66):
 
 ## API
 
@@ -47,10 +48,18 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 - `trainrun_rows` _function_ — One picker row per training run (work item a13ebc66): the manifest
 - `vadform_header_html` _function_ — Form headline + the probe-only doctrine + the split-preview state.
 
+### `cjm_transcript_decomp_qt.propset_picker`
+
+- `PropsetPicker` _class_ — One source's proposal-set ring as a native lifecycle picker.
+
 ### `cjm_transcript_decomp_qt.session`
 
 - `DecompSession` _class_ — The loop-thread seat pair for the decomp shell.
 
+### `cjm_transcript_decomp_qt.trainrun_picker`
+
+- `TrainingRunPicker` _class_ — The propose-model picker: a header row (kit modal_header, mouse
+
 ## Dependencies
 
-**Depends on:** `PySide6`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-substrate-tui-kit`, `cjm-transcript-decomp-core`
+**Depends on:** `PySide6`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-transcript-decomp-core`

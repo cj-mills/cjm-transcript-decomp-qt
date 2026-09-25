@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from cjm_substrate_tui_kit.viewport import tail
+from cjm_substrate_qt_kit.text import tail
 from cjm_transcript_decomp_core.runs import SourceRunIndex, TrainingRunIndex
 from cjm_transcript_decomp_core.segments import fmt_ts
 

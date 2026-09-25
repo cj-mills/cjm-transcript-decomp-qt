@@ -26,15 +26,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from cjm_substrate.utils.lifecycle import (artifact_id, ArtifactLifecycle, find_holders,
                                            LifecycleRefusal)
+from cjm_substrate_qt_kit.configform import ConfigForm
 from cjm_substrate_qt_kit.findbar import FindBar
 from cjm_substrate_qt_kit.keyhints import KeyHintsOverlay
 from cjm_substrate_qt_kit.keymap import KeymapRegistry
 from cjm_substrate_qt_kit.player import SpanPlayer
 from cjm_substrate_qt_kit.statusstrip import StatusStrip
 from cjm_substrate_qt_kit.style import apply_row_style
+from cjm_substrate_qt_kit.text import tail
 from cjm_substrate_qt_kit.theme import style_text_pane
-from cjm_substrate_tui_kit.form import ConfigForm
-from cjm_substrate_tui_kit.viewport import tail
 from cjm_transcript_decomp_core.runs import (DecompIndex, group_batches, is_external_transcriber,
                                              PropsetIndex, SourceRunIndex, TrainingRunIndex)
 from cjm_transcript_decomp_core.segments import (aseg_index_for, build_display,
