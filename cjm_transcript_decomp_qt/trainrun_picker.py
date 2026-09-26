@@ -114,22 +114,19 @@ class TrainingRunPicker(QDialog):
 
     def _render(self, keep_row: Optional[int] = None) -> None:
         theme = current_theme()
-        chrome = ("background: %s; border: 1px solid %s; padding: 6px;"
-                  % (theme["surface"], theme["border"]))
-        self.head.setStyleSheet("QTextBrowser { %s }" % chrome)
-        self.list.setStyleSheet("QListWidget { %s }" % chrome)
-        self.foot.setStyleSheet("QLabel { %s color: %s; }"
-                                % (chrome, theme["content-dim"]))
+        # Chrome comes from the design system's stylesheet (token schema v1);
+        # the footer paints through the state channel.
+        self.foot.setProperty("role", "dim")
         arch = ""
         if self.archived:
             arch = " · %d archived (%s)" % (
                 len(self.archived), "shown" if self.show_archived else "h shows")
         self.head.setHtml("<div style='color:%s'>%s</div>" % (
-            theme["content"],
+            theme["text"],
             modal_header("TRAINING RUN — propose model"
                          "<span style='color:%s'> · %d run(s)%s · pick "
                          "outranks the workspace pin for this sitting</span>"
-                         % (theme["content-dim"], len(self.runs), arch), theme)))
+                         % (theme["dim"], len(self.runs), arch), theme)))
         self.list.clear()
         cur = 0
         for r in trainrun_rows(self._rows(), self._pin, self._pick):

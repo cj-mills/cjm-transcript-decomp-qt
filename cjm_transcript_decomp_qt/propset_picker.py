@@ -74,7 +74,7 @@ class PropsetPicker(FormShell):
         self.set_header(
             "PROPOSAL SETS — %s<span style='color:%s'> · %d set(s)%s · pick "
             "lands in the Shift+E slot for this sitting</span>"
-            % (self._title, theme["content-dim"], len(self.sets), arch))
+            % (self._title, theme["dim"], len(self.sets), arch))
         rows: List[Dict[str, Any]] = []
         cursor = 0
         for i, m in enumerate(self._rows()):
