@@ -5,16 +5,11 @@ kit ConfigForm over a small schema), plain dicts for the manifests."""
 
 from cjm_substrate_qt_kit.configform import ConfigForm
 from cjm_transcript_decomp_core.segments import build_display, predicted_rows
-
-from cjm_transcript_decomp_qt.panes import (batch_html, config_diffs,
-                                            decomp_rows, drill_header_html,
-                                            drill_source_rows, form_rows,
-                                            probe_detail, probe_rows,
-                                            probe_summary_html,
-                                            probe_target_html, run_detail_html,
-                                            run_rows, segment_detail,
-                                            segment_rows,
-                                            segments_header_html)
+from cjm_transcript_decomp_qt.panes import (batch_html, config_diffs, decomp_rows,
+                                            drill_header_html, drill_source_rows, form_rows,
+                                            probe_detail, probe_rows, probe_summary_html,
+                                            probe_target_html, run_detail_html, run_rows,
+                                            segment_detail, segment_rows, segments_header_html)
 
 
 def src_manifest(path="/runs/r1.json", run_id="run_1", n_seg=3,

@@ -11,7 +11,6 @@ import threading
 from typing import Any, Dict, List, Optional
 
 import pytest
-
 from cjm_transcript_decomp_qt.session import DecompSession
 
 
