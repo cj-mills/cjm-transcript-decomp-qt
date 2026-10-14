@@ -55,6 +55,7 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 ### `cjm_transcript_decomp_qt.session`
 
 - `DecompSession` _class_ — The loop-thread seat pair for the decomp shell.
+- `bench_gestures` _function_ — The decomp shell's canonical gesture for the scale harness (design detail 4389a579): the
 
 ### `cjm_transcript_decomp_qt.trainrun_picker`
 
@@ -62,4 +63,4 @@ Qt shell for the decomp-batch setup app — the second workflow TUI migrated to 
 
 ## Dependencies
 
-**Depends on:** `PySide6`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-transcript-decomp-core`
+**Depends on:** `PySide6`, `cjm-context-graph-layer`, `cjm-substrate`, `cjm-substrate-qt-kit`, `cjm-transcript-decomp-core`
